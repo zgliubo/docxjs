@@ -23,3 +23,6 @@ export declare const defaultOptions: Options;
 export declare function parseAsync(data: Blob | any, userOptions?: Partial<Options>): Promise<WordDocument>;
 export declare function renderDocument(document: WordDocument, bodyContainer: HTMLElement, styleContainer?: HTMLElement, userOptions?: Partial<Options>): Promise<any>;
 export declare function renderAsync(data: Blob | any, bodyContainer: HTMLElement, styleContainer?: HTMLElement, userOptions?: Partial<Options>): Promise<any>;
+
+export declare function renderToHtmlAsync(data: Blob | any, userOptions?: Partial<Options>): Promise<string>;
+export declare function renderToHtmlElementAsync(data: Blob | any, userOptions?: Partial<Options>): Promise<HTMLElement>;

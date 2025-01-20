@@ -1,3 +1,4 @@
+import { DOMParser as DOMParser$1, DOMImplementation, XMLSerializer as XMLSerializer$1 } from 'xmldom';
 import JSZip from 'jszip';
 
 var RelationshipTypes;
@@ -81,11 +82,12 @@ function parseCommonProperty(elem, props, xml) {
     return true;
 }
 
+const _DOMParser = typeof window !== "undefined" ? DOMParser : DOMParser$1;
 function parseXmlString(xmlString, trimXmlDeclaration = false) {
     if (trimXmlDeclaration)
         xmlString = xmlString.replace(/<[?].*[?]>/, "");
     xmlString = removeUTF8BOM(xmlString);
-    const result = new DOMParser().parseFromString(xmlString, "application/xml");
+    const result = new _DOMParser().parseFromString(xmlString, "application/xml");
     const errorText = hasXmlParserError(result);
     if (errorText)
         throw new Error(errorText);
@@ -1083,6 +1085,7 @@ class CommentsExtendedPart extends Part {
     }
 }
 
+const IS_BROWSER$1 = typeof window !== "undefined";
 const topLevelRels = [
     { type: RelationshipTypes.OfficeDocument, target: "word/document.xml" },
     { type: RelationshipTypes.ExtendedProperties, target: "docProps/app.xml" },
@@ -1174,14 +1177,26 @@ class WordDocument {
         return part;
     }
     async loadDocumentImage(id, part) {
+        if (this._options.useBase64URL && !IS_BROWSER$1) {
+            const x = await this.loadResource(part ?? this.documentPart, id, "base64");
+            return "data:application/octet-stream;base64," + x;
+        }
         const x = await this.loadResource(part ?? this.documentPart, id, "blob");
         return this.blobToURL(x);
     }
     async loadNumberingImage(id) {
+        if (this._options.useBase64URL && !IS_BROWSER$1) {
+            const x = await this.loadResource(this.numberingPart, id, "base64");
+            return "data:application/octet-stream;base64," + x;
+        }
         const x = await this.loadResource(this.numberingPart, id, "blob");
         return this.blobToURL(x);
     }
     async loadFont(id, key) {
+        if (this._options.useBase64URL && !IS_BROWSER$1) {
+            const x = await this.loadResource(this.fontTablePart, id, "base64");
+            return "data:application/octet-stream;base64," + x;
+        }
         const x = await this.loadResource(this.fontTablePart, id, "uint8array");
         return x ? this.blobToURL(new Blob([deobfuscate(x, key)])) : x;
     }
@@ -2582,7 +2597,7 @@ class xmlUtil {
     static foreach(node, cb) {
         for (var i = 0; i < node.childNodes.length; i++) {
             let n = node.childNodes[i];
-            if (n.nodeType == Node.ELEMENT_NODE)
+            if (n.nodeType == 1)
                 cb(n);
         }
     }
@@ -3387,7 +3402,10 @@ section.${c}>footer { z-index: 1; }
         this.renderCommonProperties(result.style, elem);
         const numbering = elem.numbering ?? style?.paragraphProps?.numbering;
         if (numbering) {
-            result.classList.add(this.numberingClass(numbering.id, numbering.level));
+            if (result.classList.add)
+                result.classList.add(this.numberingClass(numbering.id, numbering.level));
+            else
+                result.classList.push(this.numberingClass(numbering.id, numbering.level));
         }
         return result;
     }
@@ -3600,7 +3618,7 @@ section.${c}>footer { z-index: 1; }
         this.renderStyleValues(elem.cssStyle, result);
         if (elem.span)
             result.colSpan = elem.span;
-        this.currentCellPosition.col += result.colSpan;
+        this.currentCellPosition.col += result.colSpan ?? 1;
         return result;
     }
     renderVmlPicture(elem) {
@@ -3735,8 +3753,12 @@ section.${c}>footer { z-index: 1; }
     renderClass(input, ouput) {
         if (input.className)
             ouput.className = input.className;
-        if (input.styleName)
-            ouput.classList.add(this.processStyleName(input.styleName));
+        if (input.styleName) {
+            if (ouput.classList.add)
+                ouput.classList.add(this.processStyleName(input.styleName));
+            else
+                ouput.classList.push(this.processStyleName(input.styleName));
+        }
     }
     findStyle(styleName) {
         return styleName && this.styleMap?.[styleName];
@@ -3856,6 +3878,7 @@ function findParent(elem, type) {
     return parent;
 }
 
+const IS_BROWSER = typeof window !== "undefined";
 const defaultOptions = {
     ignoreHeight: false,
     ignoreWidth: false,
@@ -3881,7 +3904,9 @@ function parseAsync(data, userOptions) {
 }
 async function renderDocument(document, bodyContainer, styleContainer, userOptions) {
     const ops = { ...defaultOptions, ...userOptions };
-    const renderer = new HtmlRenderer(window.document);
+    const domImpl = new DOMImplementation();
+    const doc = domImpl.createDocument(null, null, null);
+    const renderer = new HtmlRenderer(doc);
     return await renderer.render(document, bodyContainer, styleContainer, ops);
 }
 async function renderAsync(data, bodyContainer, styleContainer, userOptions) {
@@ -3889,6 +3914,128 @@ async function renderAsync(data, bodyContainer, styleContainer, userOptions) {
     await renderDocument(doc, bodyContainer, styleContainer, userOptions);
     return doc;
 }
+async function renderToHtmlAsync(data, userOptions) {
+    if (IS_BROWSER) {
+        const root = await renderToHtmlElementAsync(data, userOptions);
+        return root.outerHTML;
+    }
+    const root = await renderToHtmlElementAsync(data, userOptions);
+    const serializer = new XMLSerializer$1();
+    return serializer.serializeToString(root);
+}
+async function renderToHtmlElementAsync(data, userOptions) {
+    if (IS_BROWSER) {
+        const root = document.createElement('div');
+        await renderAsync(data, root, undefined, userOptions);
+        return root;
+    }
+    const domImpl = new DOMImplementation();
+    const doc = domImpl.createDocument(null, null, null);
+    const root = doc.createElement('div');
+    await renderAsync(data, root, undefined, userOptions);
+    handleXmlNode(root);
+    return root;
+}
+function kebabCase(property) {
+    return property.replace(/[A-Z]/g, char => `-${char.toLowerCase()}`);
+}
+function handleXmlNode(node, depth = 0) {
+    if (isElement(node)) {
+        if (node.className) {
+            node.setAttribute("class", node.className);
+            node.className = null;
+        }
+        if (node._classList) {
+            node.setAttribute("class", node.classList.join(" "));
+            node._classList = null;
+        }
+        if (node.innerHTML) {
+            const textNode = node.ownerDocument.createTextNode(node.innerHTML);
+            node.appendChild(textNode);
+            node.innerHTML = null;
+        }
+        if (node._style) {
+            var styles = Object.keys(node.style).map(key => {
+                return `${kebabCase(key)}: ${node.style[key]}`;
+            });
+            node.setAttribute("style", styles.join("; "));
+            node._style = null;
+        }
+        if (isTableCell(node)) {
+            if (node.rowSpan) {
+                node.setAttribute("rowspan", node.rowSpan.toString());
+            }
+            if (node.colSpan) {
+                node.setAttribute("colspan", node.colSpan.toString());
+            }
+        }
+        else if (isImage(node) && node.src) {
+            node.setAttribute("src", node.src);
+            node.src = null;
+        }
+    }
+    if (node.childNodes) {
+        for (let i = 0; i < node.childNodes.length; i++) {
+            handleXmlNode(node.childNodes[i], depth + 1);
+        }
+    }
+}
+function isElement(value) {
+    return value.nodeType === 1;
+}
+function isTableCell(value) {
+    return value.tagName == "td";
+}
+function isImage(value) {
+    return value.tagName == "img";
+}
+function initXmlDom() {
+    if (IS_BROWSER) {
+        return;
+    }
+    const doc = new DOMImplementation().createDocument(null, null, null);
+    const proto = Object.getPrototypeOf(Object.getPrototypeOf(doc));
+    if (!proto.hasOwnProperty("firstElementChild")) {
+        Object.defineProperty(proto, "firstElementChild", {
+            get() {
+                return getFirstElementChild(this);
+            }
+        });
+    }
+    if (!proto.hasOwnProperty("style")) {
+        Object.defineProperty(proto, "style", {
+            get() {
+                return this._style || (this._style = {});
+            },
+            set(value) {
+                this._style = value;
+            }
+        });
+    }
+    if (!proto.hasOwnProperty("classList")) {
+        Object.defineProperty(proto, "classList", {
+            get() {
+                return this._classList || (this._classList = []);
+            },
+            set(value) {
+                this._classList = value;
+            }
+        });
+    }
+}
+function getFirstElementChild(node) {
+    if (!node) {
+        return null;
+    }
+    const children = node.childNodes;
+    for (let i = 0; i < children.length; i++) {
+        if (children[i].nodeType === 1) {
+            return children[i];
+        }
+    }
+    return null;
+}
+initXmlDom();
 
-export { defaultOptions, parseAsync, renderAsync, renderDocument };
+export { defaultOptions, parseAsync, renderAsync, renderDocument, renderToHtmlAsync, renderToHtmlElementAsync };
 //# sourceMappingURL=docx-preview.mjs.map

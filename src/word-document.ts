@@ -19,6 +19,8 @@ import { CustomPropsPart } from "./document-props/custom-props-part";
 import { CommentsPart } from "./comments/comments-part";
 import { CommentsExtendedPart } from "./comments/comments-extended-part";
 
+const IS_BROWSER = typeof window !== "undefined";
+
 const topLevelRels = [
 	{ type: RelationshipTypes.OfficeDocument, target: "word/document.xml" },
 	{ type: RelationshipTypes.ExtendedProperties, target: "docProps/app.xml" },
@@ -125,7 +127,7 @@ export class WordDocument {
 			case RelationshipTypes.CustomProperties:
 				part = new CustomPropsPart(this._package, path);
 				break;
-	
+
 			case RelationshipTypes.Settings:
 				this.settingsPart = part = new SettingsPart(this._package, path);
 				break;
@@ -156,16 +158,28 @@ export class WordDocument {
 	}
 
 	async loadDocumentImage(id: string, part?: Part): Promise<string> {
+		if (this._options.useBase64URL && !IS_BROWSER) {
+			const x = await this.loadResource(part ?? this.documentPart, id, "base64");
+			return "data:application/octet-stream;base64," + x;
+		}
 		const x = await this.loadResource(part ?? this.documentPart, id, "blob");
 		return this.blobToURL(x);
 	}
 
 	async loadNumberingImage(id: string): Promise<string> {
+		if (this._options.useBase64URL && !IS_BROWSER) {
+			const x = await this.loadResource(this.numberingPart, id, "base64");
+			return "data:application/octet-stream;base64," + x;
+		}
 		const x = await this.loadResource(this.numberingPart, id, "blob");
 		return this.blobToURL(x);
 	}
 
 	async loadFont(id: string, key: string): Promise<string> {
+		if (this._options.useBase64URL && !IS_BROWSER) {
+			const x = await this.loadResource(this.fontTablePart, id, "base64");
+			return "data:application/octet-stream;base64," + x;
+		}
 		const x = await this.loadResource(this.fontTablePart, id, "uint8array");
 		return x ? this.blobToURL(new Blob([deobfuscate(x, key)])) : x;
 	}

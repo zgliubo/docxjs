@@ -1532,7 +1532,7 @@ class xmlUtil {
 		for (var i = 0; i < node.childNodes.length; i++) {
 			let n = node.childNodes[i];
 
-			if (n.nodeType == Node.ELEMENT_NODE)
+			if (n.nodeType == 1) // Node.ELEMENT_NODE
 				cb(<Element>n);
 		}
 	}
